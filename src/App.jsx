@@ -14,7 +14,8 @@ const G = "#16a34a", LG = "#f0fdf4";
 const EJS_SERVICE_ID       = "service_epsa8vb";
 const EJS_PUBLIC_KEY       = "Yh-UG4eCJF5r2USyR";
 const EJS_TEMPLATE_CONFIRM = "template_dyjb04r"; // 예약 확정
-const EJS_TEMPLATE_CANCEL  = "template_21mjuoo"; // 취소 여부 확인 (전주 수요일)
+const EJS_TEMPLATE_GENERIC = "template_21mjuoo"; // 공용 (취소 확인 + 관리자 알림)
+const ADMIN_EMAILS         = "mjseo@mistobrand.com,kenneth.shin@mistobrand.com"; // 신청 알림 수신
 
 const addMins  = (t,m)=>{ const [h,min]=t.split(":").map(Number),tot=h*60+min+m; return `${String(Math.floor(tot/60)).padStart(2,"0")}:${String(tot%60).padStart(2,"0")}`; };
 const slotLabel= t=>`${t} - ${addMins(t,30)}`;
@@ -136,9 +137,9 @@ function BookingPage({onAdmin}){
     const key=`bookings:${dStr(selDate)}:${selTime.replace(":","-")}`;
     if(sGet(key)){alert("이미 예약된 시간입니다.");setStep(2);return;}
     sSet(key,{name,phone,email,kakao,course:selCourse?.name,players,bookedAt:new Date().toISOString()});
-    const subj=encodeURIComponent(`[골프 예약 신청] ${name} - ${fmt(selDate)} ${selTime}`);
-    const body=encodeURIComponent(`새로운 골프 예약 신청이 들어왔습니다.\n\n▸ 예약자: ${name}\n▸ 연락처: ${phone}\n▸ 이메일: ${email}\n▸ 카카오톡 알림: ${kakao}\n▸ 날짜: ${fmt(selDate)}\n▸ 티타임: ${selTime} - ${addMins(selTime,30)}\n▸ 코스: ${selCourse?.name}\n▸ 인원: ${players}명\n\n위 내용을 확인 후 예약을 진행해 주세요.`);
-    window.open(`mailto:${OWNER}?subject=${subj}&body=${body}`);
+    // 관리자 2명에게 신청 알림 자동 발송 (공용 템플릿)
+    const adminMsg=`새로운 골프 예약 신청이 들어왔습니다.\n\n▸ 예약자: ${name}\n▸ 연락처: ${phone}\n▸ 이메일: ${email}\n▸ 카카오톡 알림: ${kakao}\n▸ 날짜: ${fmt(selDate)}\n▸ 티타임: ${selTime} - ${addMins(selTime,30)}\n▸ 코스: ${selCourse?.name}\n▸ 인원: ${players}명\n\n관리자 페이지에서 확인 후 예약을 진행해 주세요.`;
+    ejsSend(EJS_TEMPLATE_GENERIC,{to_email:ADMIN_EMAILS,subject:`[골프 예약 신청] ${name} ${fmt(selDate)} ${selTime}`,message:adminMsg}).catch(e=>console.error("관리자 알림 발송 실패:",e));
     setDone(true);
   };
 
@@ -419,13 +420,14 @@ function AdminPanel({onExit}){
   const deleteMember=id=>setConfirm({message:"멤버를 삭제할까요?",onOk:()=>{const mems=sGet("admin:members")||[];sSet("admin:members",mems.filter(m=>m.id!==id));loadMembers();}});
   const deleteBooking=key=>setConfirm({message:"예약을 삭제할까요?",onOk:()=>{sDel(key);loadBookings();}});
 
-  // 취소 여부 확인 메일 (EmailJS)
+  // 취소 여부 확인 메일 (공용 템플릿)
   const sendCancelMail=async item=>{
     const mems=sGet("admin:members")||[];
     const toEmail=mems.find(m=>m.name===item.name&&m.phone===item.phone)?.email||item.email;
     if(!toEmail){alert("이메일 정보가 없습니다.");return;}
+    const msg=`안녕하세요, ${item.name}님.\n\n다가오는 골프 예약 건의 취소 여부를 확인드립니다.\n\n▸ 예약일: ${item.ds}\n▸ 티타임: ${item.ts}\n▸ 코스: ${item.course||"-"}\n▸ 인원: ${item.players}명\n\n취소를 원하시면 이 메일에 회신 부탁드립니다.\n별도 회신이 없으실 경우 예약은 그대로 유지됩니다.\n\n문의: ${OWNER}\n\n감사합니다.`;
     try{
-      await ejsSend(EJS_TEMPLATE_CANCEL,{to_email:toEmail,name:item.name,date:item.ds,time:item.ts,course:item.course||"-",players:item.players,reply_email:OWNER});
+      await ejsSend(EJS_TEMPLATE_GENERIC,{to_email:toEmail,subject:`[골프 예약 취소 여부 확인] ${item.name}님 ${item.ds}`,message:msg});
       alert(`${item.name}님에게 취소 확인 메일을 발송했습니다.`);
     }catch(e){alert("메일 발송 실패. EmailJS 설정을 확인해 주세요.");}
   };
