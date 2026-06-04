@@ -1,21 +1,27 @@
 import { useState, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
+import { createClient } from "@supabase/supabase-js";
 
-const COURSES   = [{id:"valley",name:"Valley",emoji:"🌄"},{id:"lake",name:"Lake",emoji:"🌊"},{id:"hill",name:"Hill",emoji:"⛰️"},{id:"any",name:"상관없음",emoji:"🎯"}];
-const TIMES     = ["06:00","06:30","07:00","07:30","08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","12:00","13:00","14:00","15:00"];
-const DAYS      = ["일","월","화","수","목","금","토"];
-const OWNER     = "xxpeaxe@naver.com";
-const ADMIN_PW  = "fila3470";
-const WD_LIMIT  = 10;
-const WE_LIMIT  = 5;
-const G = "#16a34a", LG = "#f0fdf4";
+// ── Supabase 설정 ──
+const SUPABASE_URL = "https://zpgobulkqzllsekqdlyq.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwZ29idWxrcXpsbHNla3FkbHlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NDU1NTYsImV4cCI6MjA5NjEyMTU1Nn0.Xr6v5ZNdWulyobCMICp961L-gaVbRpykotuU50zrtt8";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── EmailJS 설정 ──
 const EJS_SERVICE_ID       = "service_epsa8vb";
 const EJS_PUBLIC_KEY       = "Yh-UG4eCJF5r2USyR";
 const EJS_TEMPLATE_CONFIRM = "template_dyjb04r"; // 예약 확정
 const EJS_TEMPLATE_GENERIC = "template_21mjuoo"; // 공용 (취소 확인 + 관리자 알림)
-const ADMIN_EMAILS         = "mjseo@mistobrand.com,kenneth.shin@mistobrand.com"; // 신청 알림 수신
+const ADMIN_EMAILS         = "mjseo@mistobrand.com,kenneth.shin@mistobrand.com";
+
+const COURSES   = [{id:"valley",name:"Valley",emoji:"🌄"},{id:"lake",name:"Lake",emoji:"🌊"},{id:"hill",name:"Hill",emoji:"⛰️"},{id:"any",name:"상관없음",emoji:"🎯"}];
+const TIMES     = ["06:00","06:30","07:00","07:30","08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","12:00","13:00","14:00","15:00"];
+const DAYS      = ["일","월","화","수","목","금","토"];
+const OWNER     = "kenneth.shin@mistobrand.com";
+const ADMIN_PW  = "fila3470";
+const WD_LIMIT  = 10;
+const WE_LIMIT  = 5;
+const G = "#16a34a", LG = "#f0fdf4";
 
 const addMins  = (t,m)=>{ const [h,min]=t.split(":").map(Number),tot=h*60+min+m; return `${String(Math.floor(tot/60)).padStart(2,"0")}:${String(tot%60).padStart(2,"0")}`; };
 const slotLabel= t=>`${t} - ${addMins(t,30)}`;
@@ -29,12 +35,6 @@ const getNth = (y,mo,dow,n)=>{ let c=0; for(let day=1;day<=31;day++){const dt=ne
 const getWdWindow = (y,mo)=>{ let pm=mo-1,py=y; if(pm<0){pm=11;py--;} const wed=getNth(py,pm,3,1); if(!wed)return{open:null,close:null}; return{open:null,close:new Date(wed.getFullYear(),wed.getMonth(),wed.getDate(),17,0)}; };
 const isBookable = (d,now)=>{ if(d<=now)return false; if(isWE(d)){ const ref=new Date(d);ref.setDate(d.getDate()-21); const dow=ref.getDay(),diff=dow===0?-6:1-dow,mon=new Date(ref);mon.setDate(ref.getDate()+diff); return now<=new Date(mon.getFullYear(),mon.getMonth(),mon.getDate(),17,0); } const{close}=getWdWindow(d.getFullYear(),d.getMonth()); return!!(close&&now<=close); };
 
-// ── localStorage 헬퍼 ──
-const sGet  = k=>{ try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;} };
-const sSet  = (k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v));return true;}catch{return false;} };
-const sList = p=>{ try{return Object.keys(localStorage).filter(k=>k.startsWith(p));}catch{return[];} };
-const sDel  = k=>{ try{localStorage.removeItem(k);return true;}catch{return false;} };
-
 // ── EmailJS 발송 ──
 const ejsSend = async (templateId, params) => {
   const res = await fetch("https://api.emailjs.com/api/v1.0/email/send",{
@@ -43,6 +43,34 @@ const ejsSend = async (templateId, params) => {
   });
   if(!res.ok) throw new Error(`EmailJS ${res.status}`);
 };
+
+// ── Supabase 헬퍼 ──
+// 예약 키: date(YYYY-MM-DD) + time(HH:MM) 조합으로 id 생성
+const bId = (date,time) => `${date}_${time}`;
+
+const dbBookingsByMonth = async (yearMonth) => {
+  const { data } = await supabase.from("bookings").select("*").like("date",`${yearMonth}-%`);
+  return data||[];
+};
+const dbBookingsByDate = async (date) => {
+  const { data } = await supabase.from("bookings").select("time").eq("date",date);
+  return data||[];
+};
+const dbAddBooking = async (b) => {
+  const { error } = await supabase.from("bookings").insert([b]);
+  return !error;
+};
+const dbBookingExists = async (date,time) => {
+  const { data } = await supabase.from("bookings").select("id").eq("id",bId(date,time));
+  return (data||[]).length>0;
+};
+const dbDeleteBooking = async (id) => { await supabase.from("bookings").delete().eq("id",id); };
+const dbUpdateBooking = async (id,fields) => { await supabase.from("bookings").update(fields).eq("id",id); };
+
+const dbMembers = async () => { const { data } = await supabase.from("members").select("*"); return data||[]; };
+const dbAddMember = async (m) => { await supabase.from("members").insert([m]); };
+const dbUpdateMember = async (id,fields) => { await supabase.from("members").update(fields).eq("id",id); };
+const dbDeleteMember = async (id) => { await supabase.from("members").delete().eq("id",id); };
 
 function ConfirmModal({message,onOk,onCancel}){
   return(
@@ -81,8 +109,10 @@ function BookingPage({onAdmin}){
   const [bookedTimes,setBookedTimes]   = useState([]);
   const [bookedDates,setBookedDates]   = useState(new Set());
   const [monthlyCount,setMonthlyCount] = useState({wd:0,we:0});
+  const [loadingSlots,setLoadingSlots] = useState(false);
   const [quotaErr,setQuotaErr]   = useState("");
   const [checking,setChecking]   = useState(false);
+  const [submitting,setSubmitting] = useState(false);
 
   const now   = new Date();
   const today = new Date(now.getFullYear(),now.getMonth(),now.getDate());
@@ -93,18 +123,23 @@ function BookingPage({onAdmin}){
   const wdInfo = wdWin.close?`${wdWin.close.getMonth()+1}월 ${wdWin.close.getDate()}일 17:00까지`:"-";
 
   useEffect(()=>{
-    const keys=sList(`bookings:${ym(calY,calM)}-`);
-    const dates=keys.map(k=>k.split(":")[1]);
-    setBookedDates(new Set(dates));
-    let wd=0,we=0; dates.forEach(ds=>isWE(new Date(ds))?we++:wd++);
-    setMonthlyCount({wd,we});
+    (async()=>{
+      const rows=await dbBookingsByMonth(ym(calY,calM));
+      const dates=rows.map(r=>r.date);
+      setBookedDates(new Set(dates));
+      let wd=0,we=0; dates.forEach(ds=>isWE(new Date(ds))?we++:wd++);
+      setMonthlyCount({wd,we});
+    })();
   },[calY,calM]);
 
   useEffect(()=>{
     if(step===2&&selDate){
-      const prefix=`bookings:${dStr(selDate)}:`;
-      const keys=sList(prefix);
-      setBookedTimes(keys.map(k=>k.replace(prefix,"").replace("-",":")));
+      (async()=>{
+        setLoadingSlots(true);
+        const rows=await dbBookingsByDate(dStr(selDate));
+        setBookedTimes(rows.map(r=>r.time));
+        setLoadingSlots(false);
+      })();
     }
   },[step,selDate]);
 
@@ -114,32 +149,34 @@ function BookingPage({onAdmin}){
   const nextM=()=>calM===11?(setCalY(y=>y+1),setCalM(0)):setCalM(m=>m+1);
   const canNext=()=>[!!selDate,!!selTime,!!selCourse,!!(name.trim()&&phone.trim()&&email.trim()&&kakao),true][step-1];
 
-  const checkQuota=()=>{
-    const mems=sGet("admin:members")||[];
+  const checkQuota=async()=>{
+    const mems=await dbMembers();
     const mem=mems.find(m=>m.name.trim()===name.trim()&&m.phone.replace(/\D/g,"")===phone.replace(/\D/g,""));
     if(!mem)return "등록된 멤버가 아닙니다. 관리자에게 문의해 주세요.";
-    const keys=sList(`bookings:${ym(selDate.getFullYear(),selDate.getMonth())}-`);
+    const rows=await dbBookingsByMonth(ym(selDate.getFullYear(),selDate.getMonth()));
     let wd=0,we=0;
-    for(const key of keys){const d=sGet(key);if(d?.name===mem.name&&d?.phone===mem.phone){isWE(new Date(key.split(":")[1]))?we++:wd++;}}
-    if(isWE(selDate)&&we>=mem.weekendQ)return `주말 예약 한도(${mem.weekendQ}회) 초과 — 현재 ${we}회 사용`;
-    if(!isWE(selDate)&&wd>=mem.weekdayQ)return `평일 예약 한도(${mem.weekdayQ}회) 초과 — 현재 ${wd}회 사용`;
+    rows.forEach(r=>{if(r.name===mem.name&&r.phone===mem.phone){isWE(new Date(r.date))?we++:wd++;}});
+    if(isWE(selDate)&&we>=mem.weekend_q)return `주말 예약 한도(${mem.weekend_q}회) 초과 — 현재 ${we}회 사용`;
+    if(!isWE(selDate)&&wd>=mem.weekday_q)return `평일 예약 한도(${mem.weekday_q}회) 초과 — 현재 ${wd}회 사용`;
     return null;
   };
 
-  const handleNext=()=>{
-    if(step===4){setChecking(true);setQuotaErr("");const err=checkQuota();setChecking(false);if(err){setQuotaErr(err);return;}}
+  const handleNext=async()=>{
+    if(step===4){setChecking(true);setQuotaErr("");const err=await checkQuota();setChecking(false);if(err){setQuotaErr(err);return;}}
     step<5?setStep(s=>s+1):handleConfirm();
   };
 
   const reset=()=>{setStep(1);setSelDate(null);setSelTime(null);setSelCourse(null);setPlayers(2);setName("");setPhone("");setEmail("");setKakao("");setDone(false);setBookedTimes([]);setQuotaErr("");};
 
-  const handleConfirm=()=>{
-    const key=`bookings:${dStr(selDate)}:${selTime.replace(":","-")}`;
-    if(sGet(key)){alert("이미 예약된 시간입니다.");setStep(2);return;}
-    sSet(key,{name,phone,email,kakao,course:selCourse?.name,players,bookedAt:new Date().toISOString()});
-    // 관리자 2명에게 신청 알림 자동 발송 (공용 템플릿)
+  const handleConfirm=async()=>{
+    setSubmitting(true);
+    const date=dStr(selDate), time=selTime;
+    if(await dbBookingExists(date,time)){alert("이미 예약된 시간입니다.");setSubmitting(false);setStep(2);return;}
+    const ok=await dbAddBooking({id:bId(date,time),date,time,name,phone,email,kakao,course:selCourse?.name,players,confirmed:false,kakao_sent:false});
+    if(!ok){alert("예약 저장에 실패했습니다. 다시 시도해 주세요.");setSubmitting(false);return;}
     const adminMsg=`새로운 골프 예약 신청이 들어왔습니다.\n\n▸ 예약자: ${name}\n▸ 연락처: ${phone}\n▸ 이메일: ${email}\n▸ 카카오톡 알림: ${kakao}\n▸ 날짜: ${fmt(selDate)}\n▸ 티타임: ${selTime} - ${addMins(selTime,30)}\n▸ 코스: ${selCourse?.name}\n▸ 인원: ${players}명\n\n관리자 페이지에서 확인 후 예약을 진행해 주세요.`;
-    ejsSend(EJS_TEMPLATE_GENERIC,{to_email:ADMIN_EMAILS,subject:`[골프 예약 신청] ${name} ${fmt(selDate)} ${selTime}`,message:adminMsg}).catch(e=>console.error("관리자 알림 발송 실패:",e));
+    ejsSend(EJS_TEMPLATE_GENERIC,{to_email:ADMIN_EMAILS,subject:`[골프 예약 신청] ${name} ${fmt(selDate)} ${selTime}`,message:adminMsg}).catch(e=>console.error("관리자 알림 실패:",e));
+    setSubmitting(false);
     setDone(true);
   };
 
@@ -224,14 +261,18 @@ function BookingPage({onAdmin}){
         {step===2&&(
           <div>
             <p style={{color:"#6b7280",fontSize:13,marginBottom:14}}>{fmt(selDate)} 티타임을 선택해 주세요.</p>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
-              {TIMES.map(t=>{const booked=bookedTimes.includes(t),sel=selTime===t;return(
-                <button key={t} disabled={booked} onClick={()=>setSelTime(t)} style={{padding:"11px 10px",borderRadius:8,border:`1.5px solid ${sel?G:booked?"#f3f4f6":"#e5e7eb"}`,background:sel?LG:booked?"#f9fafb":"#fff",color:sel?G:booked?"#d1d5db":"#374151",fontWeight:sel?700:400,cursor:booked?"not-allowed":"pointer",fontSize:13}}>
-                  {slotLabel(t)}{booked&&<div style={{fontSize:9,color:"#d1d5db"}}>예약됨</div>}
-                </button>
-              );})}
-            </div>
-            {bookedTimes.length>0&&<p style={{fontSize:12,color:"#9ca3af",marginTop:12,textAlign:"center"}}>회색 슬롯은 이미 예약된 시간입니다.</p>}
+            {loadingSlots?<p style={{textAlign:"center",color:"#9ca3af",padding:"24px 0"}}>슬롯 확인 중...</p>:(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+                  {TIMES.map(t=>{const booked=bookedTimes.includes(t),sel=selTime===t;return(
+                    <button key={t} disabled={booked} onClick={()=>setSelTime(t)} style={{padding:"11px 10px",borderRadius:8,border:`1.5px solid ${sel?G:booked?"#f3f4f6":"#e5e7eb"}`,background:sel?LG:booked?"#f9fafb":"#fff",color:sel?G:booked?"#d1d5db":"#374151",fontWeight:sel?700:400,cursor:booked?"not-allowed":"pointer",fontSize:13}}>
+                      {slotLabel(t)}{booked&&<div style={{fontSize:9,color:"#d1d5db"}}>예약됨</div>}
+                    </button>
+                  );})}
+                </div>
+                {bookedTimes.length>0&&<p style={{fontSize:12,color:"#9ca3af",marginTop:12,textAlign:"center"}}>회색 슬롯은 이미 예약된 시간입니다.</p>}
+              </>
+            )}
           </div>
         )}
 
@@ -292,8 +333,8 @@ function BookingPage({onAdmin}){
 
         <div style={{display:"flex",gap:10,marginTop:28}}>
           {step>1&&<button onClick={()=>{setQuotaErr("");setStep(s=>s-1);}} style={{flex:1,padding:"12px 0",borderRadius:10,border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontWeight:600,color:"#374151",fontSize:15}}>이전</button>}
-          <button disabled={!canNext()||checking} onClick={handleNext} style={{flex:2,padding:"12px 0",borderRadius:10,border:"none",background:canNext()&&!checking?G:"#d1d5db",color:"#fff",cursor:canNext()&&!checking?"pointer":"not-allowed",fontWeight:700,fontSize:15}}>
-            {checking?"확인 중...":step===5?"신청 완료":"다음 →"}
+          <button disabled={!canNext()||checking||submitting} onClick={handleNext} style={{flex:2,padding:"12px 0",borderRadius:10,border:"none",background:canNext()&&!checking&&!submitting?G:"#d1d5db",color:"#fff",cursor:canNext()&&!checking&&!submitting?"pointer":"not-allowed",fontWeight:700,fontSize:15}}>
+            {checking?"확인 중...":submitting?"신청 중...":step===5?"신청 완료":"다음 →"}
           </button>
         </div>
         <p onClick={onAdmin} style={{textAlign:"center",marginTop:20,fontSize:11,color:"#d1d5db",cursor:"pointer",userSelect:"none"}}>관리자</p>
@@ -312,10 +353,9 @@ function AdminPanel({onExit}){
   const [tab,setTab]             = useState("members");
   const [members,setMembers]     = useState([]);
   const [bookings,setBookings]   = useState([]);
-  const [confirmedKeys,setConfirmedKeys]   = useState(new Set());
-  const [kakaoSentKeys,setKakaoSentKeys]   = useState(new Set());
   const [quotaData,setQuotaData] = useState([]);
   const [cancelItems,setCancelItems] = useState([]);
+  const [loading,setLoading]     = useState(false);
   const [confirm,setConfirm]     = useState(null);
   const [sending,setSending]     = useState(null);
 
@@ -332,49 +372,40 @@ function AdminPanel({onExit}){
   const [editId,setEditId]=useState(null);
 
   const login=()=>pw===ADMIN_PW?(setAuthed(true),setPwErr(false)):setPwErr(true);
-  const loadMembers=useCallback(()=>{setMembers(sGet("admin:members")||[]);},[]);
+  const loadMembers=useCallback(async()=>{setMembers(await dbMembers());},[]);
 
-  const loadBookings=useCallback(()=>{
-    const keys=sList(`bookings:${ym(fY,fM)}-`);
-    const res=[]; const cfSet=new Set(); const kkSet=new Set();
-    for(const key of keys){
-      const d=sGet(key);
-      if(d){
-        const p=key.split(":");
-        res.push({key,ds:p[1],ts:p[2]?.replace("-",":"),...d});
-        if(sGet(key.replace("bookings:","confirm:")))cfSet.add(key);
-        if(sGet(key.replace("bookings:","kakaosent:")))kkSet.add(key);
-      }
-    }
-    res.sort((a,b)=>a.ds.localeCompare(b.ds)||a.ts.localeCompare(b.ts));
-    setBookings(res); setConfirmedKeys(cfSet); setKakaoSentKeys(kkSet);
+  const loadBookings=useCallback(async()=>{
+    setLoading(true);
+    const rows=await dbBookingsByMonth(ym(fY,fM));
+    rows.sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));
+    setBookings(rows);
+    setLoading(false);
   },[fY,fM]);
 
-  const loadQuota=useCallback(()=>{
-    const mems=sGet("admin:members")||[];
-    const keys=sList(`bookings:${ym(fY,fM)}-`);
-    const bkgs=[];
-    for(const key of keys){const d=sGet(key);if(d){const dt=new Date(key.split(":")[1]);bkgs.push({...d,we:isWE(dt)});}}
-    setQuotaData(mems.map(m=>{const mine=bkgs.filter(b=>b.name===m.name&&b.phone===m.phone);return{...m,wdU:mine.filter(b=>!b.we).length,weU:mine.filter(b=>b.we).length};}));
+  const loadQuota=useCallback(async()=>{
+    setLoading(true);
+    const mems=await dbMembers();
+    const rows=await dbBookingsByMonth(ym(fY,fM));
+    setQuotaData(mems.map(m=>{const mine=rows.filter(r=>r.name===m.name&&r.phone===m.phone);return{...m,wdU:mine.filter(r=>!isWE(new Date(r.date))).length,weU:mine.filter(r=>isWE(new Date(r.date))).length};}));
+    setLoading(false);
   },[fY,fM]);
 
-  const loadCancel=useCallback(()=>{
+  const loadCancel=useCallback(async()=>{
+    setLoading(true);
     const seen=new Set(),items=[];
     for(let w=0;w<8;w++){
       const ref=new Date(todayMid);ref.setDate(ref.getDate()+w*7);
-      const keys=sList(`bookings:${ym(ref.getFullYear(),ref.getMonth())}-`);
-      for(const key of keys){
-        if(seen.has(key))continue;seen.add(key);
-        const d=sGet(key);if(!d)continue;
-        const ds=key.split(":")[1],ts=key.split(":")[2]?.replace("-",":");
-        const date=new Date(ds);if(date<=todayMid)continue;
+      const rows=await dbBookingsByMonth(ym(ref.getFullYear(),ref.getMonth()));
+      for(const r of rows){
+        if(seen.has(r.id))continue;seen.add(r.id);
+        const date=new Date(r.date);if(date<=todayMid)continue;
         const dow=date.getDay()===0?7:date.getDay();
         const bkgMon=new Date(date);bkgMon.setDate(date.getDate()-dow+1);
-        const noticeWed=new Date(bkgMon);noticeWed.setDate(bkgMon.getDate()-7+2); // 전주 수요일
-        items.push({key,ds,ts,date,noticeFri:noticeWed,isToday:noticeWed.toDateString()===todayMid.toDateString(),isPast:noticeWed<todayMid,...d});
+        const noticeWed=new Date(bkgMon);noticeWed.setDate(bkgMon.getDate()-7+2);
+        items.push({...r,ds:r.date,ts:r.time,date,noticeWed,isToday:noticeWed.toDateString()===todayMid.toDateString(),isPast:noticeWed<todayMid});
       }
     }
-    items.sort((a,b)=>a.date-b.date);setCancelItems(items);
+    items.sort((a,b)=>a.date-b.date);setCancelItems(items);setLoading(false);
   },[]);
 
   useEffect(()=>{if(authed)loadMembers();},[authed]);
@@ -382,47 +413,44 @@ function AdminPanel({onExit}){
 
   const sendConfirmEmail=async b=>{
     try{
-      await ejsSend(EJS_TEMPLATE_CONFIRM,{to_email:b.email,name:b.name,date:b.ds,time:b.ts,course:b.course||"-",players:b.players,reply_email:OWNER});
+      await ejsSend(EJS_TEMPLATE_CONFIRM,{to_email:b.email,name:b.name,date:b.date,time:b.time,course:b.course||"-",players:b.players,reply_email:OWNER});
       return true;
     }catch(e){console.error("EmailJS 오류:",e);return false;}
   };
 
   const toggleConfirm=async b=>{
-    const cfKey=b.key.replace("bookings:","confirm:");
-    if(confirmedKeys.has(b.key)){
-      sDel(cfKey);
-      setConfirmedKeys(prev=>{const s=new Set(prev);s.delete(b.key);return s;});
+    if(b.confirmed){
+      await dbUpdateBooking(b.id,{confirmed:false});
+      setBookings(prev=>prev.map(x=>x.id===b.id?{...x,confirmed:false}:x));
     }else{
-      setSending(b.key);
+      setSending(b.id);
       const ok=await sendConfirmEmail(b);
       setSending(null);
       if(!ok){alert("메일 발송 실패. EmailJS 설정을 확인해 주세요.");return;}
-      sSet(cfKey,true);
-      setConfirmedKeys(prev=>new Set([...prev,b.key]));
+      await dbUpdateBooking(b.id,{confirmed:true});
+      setBookings(prev=>prev.map(x=>x.id===b.id?{...x,confirmed:true}:x));
     }
   };
 
-  const toggleKakaoSent=b=>{
-    const kkKey=b.key.replace("bookings:","kakaosent:");
-    if(kakaoSentKeys.has(b.key)){sDel(kkKey);setKakaoSentKeys(prev=>{const s=new Set(prev);s.delete(b.key);return s;});}
-    else{sSet(kkKey,true);setKakaoSentKeys(prev=>new Set([...prev,b.key]));}
+  const toggleKakaoSent=async b=>{
+    const next=!b.kakao_sent;
+    await dbUpdateBooking(b.id,{kakao_sent:next});
+    setBookings(prev=>prev.map(x=>x.id===b.id?{...x,kakao_sent:next}:x));
   };
 
-  const saveMember=()=>{
+  const saveMember=async()=>{
     if(!nName.trim()||!nPhone.trim())return;
-    const mems=sGet("admin:members")||[];
-    if(editId){sSet("admin:members",mems.map(m=>m.id===editId?{...m,name:nName.trim(),phone:nPhone.trim(),email:nEmail.trim(),weekdayQ:nWd,weekendQ:nWe}:m));setEditId(null);}
-    else{sSet("admin:members",[...mems,{id:Date.now().toString(),name:nName.trim(),phone:nPhone.trim(),email:nEmail.trim(),weekdayQ:nWd,weekendQ:nWe}]);}
+    if(editId){await dbUpdateMember(editId,{name:nName.trim(),phone:nPhone.trim(),email:nEmail.trim(),weekday_q:nWd,weekend_q:nWe});setEditId(null);}
+    else{await dbAddMember({id:Date.now().toString(),name:nName.trim(),phone:nPhone.trim(),email:nEmail.trim(),weekday_q:nWd,weekend_q:nWe});}
     setNName("");setNPhone("");setNEmail("");setNWd(10);setNWe(5);loadMembers();
   };
-  const startEdit=m=>{setEditId(m.id);setNName(m.name);setNPhone(m.phone);setNEmail(m.email||"");setNWd(m.weekdayQ);setNWe(m.weekendQ);};
+  const startEdit=m=>{setEditId(m.id);setNName(m.name);setNPhone(m.phone);setNEmail(m.email||"");setNWd(m.weekday_q);setNWe(m.weekend_q);};
   const cancelEdit=()=>{setEditId(null);setNName("");setNPhone("");setNEmail("");setNWd(10);setNWe(5);};
-  const deleteMember=id=>setConfirm({message:"멤버를 삭제할까요?",onOk:()=>{const mems=sGet("admin:members")||[];sSet("admin:members",mems.filter(m=>m.id!==id));loadMembers();}});
-  const deleteBooking=key=>setConfirm({message:"예약을 삭제할까요?",onOk:()=>{sDel(key);loadBookings();}});
+  const deleteMember=id=>setConfirm({message:"멤버를 삭제할까요?",onOk:async()=>{await dbDeleteMember(id);loadMembers();}});
+  const deleteBooking=id=>setConfirm({message:"예약을 삭제할까요?",onOk:async()=>{await dbDeleteBooking(id);loadBookings();}});
 
-  // 취소 여부 확인 메일 (공용 템플릿)
   const sendCancelMail=async item=>{
-    const mems=sGet("admin:members")||[];
+    const mems=await dbMembers();
     const toEmail=mems.find(m=>m.name===item.name&&m.phone===item.phone)?.email||item.email;
     if(!toEmail){alert("이메일 정보가 없습니다.");return;}
     const msg=`안녕하세요, ${item.name}님.\n\n다가오는 골프 예약 건의 취소 여부를 확인드립니다.\n\n▸ 예약일: ${item.ds}\n▸ 티타임: ${item.ts}\n▸ 코스: ${item.course||"-"}\n▸ 인원: ${item.players}명\n\n취소를 원하시면 이 메일에 회신 부탁드립니다.\n별도 회신이 없으실 경우 예약은 그대로 유지됩니다.\n\n문의: ${OWNER}\n\n감사합니다.`;
@@ -434,14 +462,14 @@ function AdminPanel({onExit}){
 
   const exportExcel=()=>{
     if(!bookings.length){alert("내보낼 예약이 없습니다.");return;}
-    const rows=bookings.map(b=>{const date=new Date(b.ds);return{
-      "날짜":b.ds,"요일":DAYS[date.getDay()],"구분":isWE(date)?"주말":"평일",
-      "티타임":b.ts,"예약자":b.name,"연락처":b.phone,"이메일":b.email||"-",
+    const rows=bookings.map(b=>{const date=new Date(b.date);return{
+      "날짜":b.date,"요일":DAYS[date.getDay()],"구분":isWE(date)?"주말":"평일",
+      "티타임":b.time,"예약자":b.name,"연락처":b.phone,"이메일":b.email||"-",
       "코스":b.course||"-","인원":b.players,
-      "예약 확정":confirmedKeys.has(b.key)?"✓":"",
+      "예약 확정":b.confirmed?"✓":"",
       "카카오 알림":b.kakao==="O"?"필요":"불필요",
-      "카카오 발송":b.kakao==="O"?(kakaoSentKeys.has(b.key)?"✓":"대기"):"-",
-      "신청일시":b.bookedAt?new Date(b.bookedAt).toLocaleString("ko-KR"):"-",
+      "카카오 발송":b.kakao==="O"?(b.kakao_sent?"✓":"대기"):"-",
+      "신청일시":b.booked_at?new Date(b.booked_at).toLocaleString("ko-KR"):"-",
     };});
     const ws=XLSX.utils.json_to_sheet(rows);
     ws["!cols"]=[{wch:12},{wch:6},{wch:6},{wch:12},{wch:10},{wch:14},{wch:22},{wch:8},{wch:5},{wch:10},{wch:10},{wch:10},{wch:20}];
@@ -528,7 +556,7 @@ function AdminPanel({onExit}){
                   <div style={{flex:1}}>
                     <div style={{fontWeight:600,fontSize:14}}>{m.name}</div>
                     <div style={{fontSize:12,color:"#9ca3af"}}>{m.phone} · {m.email||"이메일 없음"}</div>
-                    <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>평일 {m.weekdayQ}회 · 주말 {m.weekendQ}회 / 월</div>
+                    <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>평일 {m.weekday_q}회 · 주말 {m.weekend_q}회 / 월</div>
                   </div>
                   <button onClick={()=>startEdit(m)} style={{background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:12}}>수정</button>
                   <button onClick={()=>deleteMember(m.id)} style={{background:"#fff0f0",border:"1px solid #fecaca",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:12,color:"#ef4444"}}>삭제</button>
@@ -547,6 +575,7 @@ function AdminPanel({onExit}){
               <button onClick={loadBookings} style={{marginLeft:"auto",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:6,padding:"6px 12px",cursor:"pointer",fontSize:12}}>새로고침</button>
               <button onClick={exportExcel} style={{background:G,color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>📥 엑셀</button>
             </div>
+            {loading?<p style={{textAlign:"center",color:"#9ca3af",padding:40}}>불러오는 중...</p>:(
             <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
               <div style={{padding:"13px 20px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontWeight:700,fontSize:14}}>예약 {bookings.length}건</span>
@@ -554,45 +583,44 @@ function AdminPanel({onExit}){
               </div>
               {bookings.length===0&&<p style={{textAlign:"center",color:"#9ca3af",padding:24,fontSize:13}}>예약이 없습니다.</p>}
               {bookings.map(b=>{
-                const we=isWE(new Date(b.ds));
-                const confirmed=confirmedKeys.has(b.key);
-                const kakaoSent=kakaoSentKeys.has(b.key);
+                const we=isWE(new Date(b.date));
                 const needsKakao=b.kakao==="O";
-                const isSending=sending===b.key;
+                const isSending=sending===b.id;
                 return(
-                  <div key={b.key} style={{padding:"12px 20px",borderBottom:"1px solid #f9fafb",background:confirmed?"#f0fdf4":"#fff",transition:"background 0.2s"}}>
+                  <div key={b.id} style={{padding:"12px 20px",borderBottom:"1px solid #f9fafb",background:b.confirmed?"#f0fdf4":"#fff",transition:"background 0.2s"}}>
                     <div style={{display:"flex",gap:10,alignItems:"center"}}>
                       <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,flexShrink:0}}>
                         {isSending
                           ? <div style={{width:18,height:18,border:"2px solid #d1d5db",borderTopColor:G,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-                          : <input type="checkbox" checked={confirmed} onChange={()=>toggleConfirm(b)} style={{width:18,height:18,cursor:"pointer",accentColor:G}}/>
+                          : <input type="checkbox" checked={b.confirmed} onChange={()=>toggleConfirm(b)} style={{width:18,height:18,cursor:"pointer",accentColor:G}}/>
                         }
                         <span style={{fontSize:9,color:"#9ca3af",whiteSpace:"nowrap"}}>예약확정</span>
                       </div>
                       <div style={{width:50,textAlign:"center",flexShrink:0}}>
-                        <div style={{fontSize:12,fontWeight:600}}>{b.ds.slice(5)}</div>
+                        <div style={{fontSize:12,fontWeight:600}}>{b.date.slice(5)}</div>
                         <div style={{fontSize:10,fontWeight:600,color:we?"#3b82f6":G,background:we?"#eff6ff":LG,borderRadius:4,padding:"2px 4px",marginTop:3}}>{we?"주말":"평일"}</div>
                       </div>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontWeight:600,fontSize:13,color:confirmed?"#15803d":"#111",display:"flex",alignItems:"center",flexWrap:"wrap",gap:4}}>
+                        <div style={{fontWeight:600,fontSize:13,color:b.confirmed?"#15803d":"#111",display:"flex",alignItems:"center",flexWrap:"wrap",gap:4}}>
                           {b.name} · {b.players}명
-                          {confirmed&&<span style={{fontSize:10,color:"#16a34a",background:"#dcfce7",borderRadius:4,padding:"1px 5px"}}>✓ 예약확정</span>}
+                          {b.confirmed&&<span style={{fontSize:10,color:"#16a34a",background:"#dcfce7",borderRadius:4,padding:"1px 5px"}}>✓ 예약확정</span>}
                           {needsKakao&&<span style={{fontSize:10,background:"#FEE500",color:"#3C1E1E",borderRadius:4,padding:"1px 5px",fontWeight:700}}>카카오</span>}
                         </div>
-                        <div style={{fontSize:12,color:"#9ca3af"}}>{b.ts} · {b.course||"-"} · {b.phone}</div>
+                        <div style={{fontSize:12,color:"#9ca3af"}}>{b.time} · {b.course||"-"} · {b.phone}</div>
                       </div>
                       {needsKakao&&(
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,flexShrink:0}}>
-                          <input type="checkbox" checked={kakaoSent} onChange={()=>toggleKakaoSent(b)} style={{width:18,height:18,cursor:"pointer",accentColor:"#F9E000"}}/>
+                          <input type="checkbox" checked={b.kakao_sent} onChange={()=>toggleKakaoSent(b)} style={{width:18,height:18,cursor:"pointer",accentColor:"#F9E000"}}/>
                           <span style={{fontSize:9,color:"#9ca3af",whiteSpace:"nowrap"}}>카카오발송</span>
                         </div>
                       )}
-                      <button onClick={()=>deleteBooking(b.key)} style={{background:"#fff0f0",border:"1px solid #fecaca",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11,color:"#ef4444",flexShrink:0}}>삭제</button>
+                      <button onClick={()=>deleteBooking(b.id)} style={{background:"#fff0f0",border:"1px solid #fecaca",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11,color:"#ef4444",flexShrink:0}}>삭제</button>
                     </div>
                   </div>
                 );
               })}
             </div>
+            )}
             <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
           </div>
         )}
@@ -604,22 +632,24 @@ function AdminPanel({onExit}){
               <span style={{fontWeight:700,fontSize:16}}>{fY}년 {fM+1}월 쿼터 현황</span>
               <button onClick={nextM} style={{background:"none",border:"none",cursor:"pointer",fontSize:20}}>›</button>
             </div>
+            {loading?<p style={{textAlign:"center",color:"#9ca3af",padding:40}}>불러오는 중...</p>:(
             <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
               {quotaData.length===0&&<p style={{textAlign:"center",color:"#9ca3af",padding:24,fontSize:13}}>멤버가 없습니다.</p>}
               {quotaData.map(m=>(
                 <div key={m.id} style={{padding:"16px 20px",borderBottom:"1px solid #f9fafb"}}>
                   <div style={{fontWeight:600,fontSize:14,marginBottom:10}}>{m.name}</div>
                   <div style={{marginBottom:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280"}}><span>평일</span><span style={{fontWeight:600,color:m.wdU>=m.weekdayQ?"#ef4444":G}}>{m.wdU}/{m.weekdayQ}회</span></div>
-                    {bar(m.wdU,m.weekdayQ,G)}
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280"}}><span>평일</span><span style={{fontWeight:600,color:m.wdU>=m.weekday_q?"#ef4444":G}}>{m.wdU}/{m.weekday_q}회</span></div>
+                    {bar(m.wdU,m.weekday_q,G)}
                   </div>
                   <div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280"}}><span>주말</span><span style={{fontWeight:600,color:m.weU>=m.weekendQ?"#ef4444":"#3b82f6"}}>{m.weU}/{m.weekendQ}회</span></div>
-                    {bar(m.weU,m.weekendQ,"#3b82f6")}
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280"}}><span>주말</span><span style={{fontWeight:600,color:m.weU>=m.weekend_q?"#ef4444":"#3b82f6"}}>{m.weU}/{m.weekend_q}회</span></div>
+                    {bar(m.weU,m.weekend_q,"#3b82f6")}
                   </div>
                 </div>
               ))}
             </div>
+            )}
           </div>
         )}
 
@@ -633,29 +663,31 @@ function AdminPanel({onExit}){
               <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"14px 16px",marginBottom:16}}>
                 <div style={{fontWeight:700,color:"#92400e",fontSize:13,marginBottom:10}}>🔴 오늘 발송해야 할 알림</div>
                 {todayAlerts.map(i=>(
-                  <div key={i.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:"1px solid #fde68a"}}>
+                  <div key={i.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:"1px solid #fde68a"}}>
                     <div><div style={{fontWeight:600,fontSize:13}}>{i.name} — {i.ds} {i.ts}</div><div style={{fontSize:11,color:"#92400e"}}>{i.phone}</div></div>
                     <button onClick={()=>sendCancelMail(i)} style={{background:"#f97316",color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700}}>📧 발송</button>
                   </div>
                 ))}
               </div>
             )}
+            {loading?<p style={{textAlign:"center",color:"#9ca3af",padding:40}}>불러오는 중...</p>:(
             <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
               <div style={{padding:"13px 20px",borderBottom:"1px solid #f3f4f6",fontWeight:700,fontSize:14}}>전체 일정 ({cancelItems.length}건)</div>
               {cancelItems.length===0&&<p style={{textAlign:"center",color:"#9ca3af",padding:24,fontSize:13}}>예약이 없습니다.</p>}
               {cancelItems.map(i=>(
-                <div key={i.key} style={{padding:"12px 20px",borderBottom:"1px solid #f9fafb",display:"flex",gap:12,alignItems:"center",background:i.isToday?"#fffbeb":i.isPast?"#fafafa":"#fff"}}>
+                <div key={i.id} style={{padding:"12px 20px",borderBottom:"1px solid #f9fafb",display:"flex",gap:12,alignItems:"center",background:i.isToday?"#fffbeb":i.isPast?"#fafafa":"#fff"}}>
                   <div style={{flex:1}}>
                     <div style={{fontWeight:600,fontSize:13,color:i.isPast?"#9ca3af":"#111"}}>
                       {i.name} — {i.ds} {i.ts}
                       <span style={{marginLeft:6,fontSize:10,fontWeight:600,color:isWE(i.date)?"#3b82f6":G,background:isWE(i.date)?"#eff6ff":LG,borderRadius:4,padding:"1px 5px"}}>{isWE(i.date)?"주말":"평일"}</span>
                     </div>
-                    <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📧 발송일: {fmtS(i.noticeFri)}{i.isToday?" 🔴 오늘":i.isPast?" (지남)":""}</div>
+                    <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📧 발송일: {fmtS(i.noticeWed)}{i.isToday?" 🔴 오늘":i.isPast?" (지남)":""}</div>
                   </div>
                   {!i.isPast&&<button onClick={()=>sendCancelMail(i)} style={{background:i.isToday?"#f97316":"#f9fafb",color:i.isToday?"#fff":"#374151",border:`1px solid ${i.isToday?"#f97316":"#e5e7eb"}`,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>📧 발송</button>}
                 </div>
               ))}
             </div>
+            )}
           </div>
         )}
       </div>
